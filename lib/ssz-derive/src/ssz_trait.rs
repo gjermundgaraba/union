@@ -140,6 +140,9 @@ fn container(
             )
         })
         .unzip::<_, _, Vec<_>, Vec<_>>();
+    println!("name: {:?}", name);
+    println!("ident: {:?}", ident);
+    println!(" ");
 
     let num_leaves = ident.len();
 
@@ -163,10 +166,16 @@ fn container(
             const TREE_HASH_TYPE: ::ssz::tree_hash::TreeHashType = ::ssz::tree_hash::TreeHashType::Container;
 
             fn tree_hash_root(&self) -> ::ssz::tree_hash::Hash256 {
+                println!("ssz generic tree_hash_root");
+                println!("num_leaves: {}", #num_leaves);
+                println!("name: {:?}", stringify!(#name));
                 let mut hasher = ::ssz::tree_hash::MerkleHasher::with_leaves(#num_leaves);
 
                 #(
-                    hasher.write(&self.#ident.tree_hash_root())
+                    println!("Processing field: {:?}", stringify!(#ident));
+                    let hash = self.#ident.tree_hash_root();
+                    println!("hash: {:?}", serde_utils::to_hex(hash));
+                    hasher.write(hash.as_slice())
                         .expect("tree hash derive should not apply too many leaves");
                 )*
 
@@ -337,6 +346,8 @@ fn wrapper(item: &DeriveInput, struct_data: &DataStruct) -> Result<TokenStream, 
             const TREE_HASH_TYPE: ::ssz::tree_hash::TreeHashType = <#ty as ::ssz::Ssz>::TREE_HASH_TYPE;
 
             fn tree_hash_root(&self) -> ::ssz::tree_hash::Hash256 {
+                println!("impl generic tree_hash_root 1");
+
                 self.#ident.tree_hash_root()
             }
 
@@ -406,6 +417,7 @@ fn enum_union(derive_input: &DeriveInput, enum_data: &DataEnum) -> Result<TokenS
             const TREE_HASH_TYPE: ::ssz::tree_hash::TreeHashType = ::ssz::tree_hash::TreeHashType::Container;
 
             fn tree_hash_root(&self) -> ::ssz::tree_hash::Hash256 {
+                println!("impl generic tree_hash_root 2");
                 match self {
                     #(
                         Self::#variant(ref inner) => {

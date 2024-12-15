@@ -30,6 +30,8 @@ sha3               = { workspace = true }
 thiserror          = { workspace = true }
 trie-db            = { version = "0.28", default-features = false }
 typenum            = { workspace = true, features = ["const-generics", "no_std"] }
+base64          = { workspace = true, features = ["alloc"] }
+
 
 [dev-dependencies]
 hex-literal = { workspace = true }

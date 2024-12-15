@@ -342,14 +342,18 @@ pub fn get_lc_execution_root<C: ChainSpec>(
 ) -> H256 {
     let epoch = compute_epoch_at_slot::<C>(header.beacon.slot);
     if epoch >= fork_parameters.deneb.epoch {
+        println!("deneb");
         return header.execution.tree_hash_root().into();
     }
 
     if epoch >= fork_parameters.capella.epoch {
+        println!("capella");
         return CapellaExecutionPayloadHeader::from(header.execution.clone())
             .tree_hash_root()
             .into();
     }
+
+    println!("default");
 
     H256::default()
 }
@@ -388,10 +392,22 @@ pub fn is_valid_light_client_header<C: ChainSpec>(
 mod tests {
     use std::{cmp::Ordering, fs};
 
+    use base64::prelude::*;
+    use hex_literal::hex;
     use serde::Deserialize;
+    use serde_utils::to_hex;
+    use ssz::types::{List, Vector};
+    use typenum::UInt;
     use unionlabs::{
-        ethereum::config::{Mainnet, SEPOLIA},
-        ibc::lightclients::ethereum::{storage_proof::StorageProof, sync_committee::SyncCommittee},
+        ethereum::config::{
+            Config, Mainnet, Minimal, BYTES_PER_LOGS_BLOOM, MAX_EXTRA_DATA_BYTES, MINIMAL, SEPOLIA,
+            SYNC_COMMITTEE_SIZE,
+        },
+        ibc::lightclients::ethereum::{
+            beacon_block_header::BeaconBlockHeader,
+            execution_payload_header::ExecutionPayloadHeader, storage_proof::StorageProof,
+            sync_committee::SyncCommittee,
+        },
     };
 
     use super::*;
@@ -823,5 +839,564 @@ mod tests {
                 "invalid finalized header"
             );
         });
+    }
+
+    #[test]
+    fn validate_merkle_branch1() {
+        let fork_parameters = &MINIMAL.fork_parameters;
+        let header = &LightClientHeader::<Minimal> {
+            beacon: BeaconBlockHeader {
+                slot: 100000,
+                proposer_index: 0,
+                parent_root: H256::new([1; 32]),
+                state_root: H256::new([1; 32]),
+                body_root: H256::from(hex!(
+                    "045a26b541713c820616774b2082317cdd74dcff424c255c803e558843e55371"
+                )),
+            },
+            execution: ExecutionPayloadHeader::<Minimal> {
+                parent_hash: H256::from(hex!(
+                    "f55156c2b27326547193bcd2501c8300a0f3617a7d71f096fc992955f042ea50"
+                )),
+                fee_recipient: H160::from(hex!("8943545177806ED17B9F23F0a21ee5948eCaa776")),
+                state_root: H256::from(hex!(
+                    "47baba45d0ee0f0abaa42d7fbdba87908052d81fe33806576215bcf136167510"
+                )),
+                receipts_root: H256::from(hex!(
+                    "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
+                )),
+                logs_bloom: create_logs_bloom::<Minimal>(),
+                prev_randao: H256::from(hex!(
+                    "707a729f27185bfd88c746532e0909f7f4604dc5b25b6d9ffb5cfec6ca7987d9"
+                )),
+                block_number: 80,
+                gas_limit: 30000000,
+                gas_used: 0,
+                timestamp: 1732901097,
+                extra_data: List::from(
+                    serde_utils::parse_hex("0xd883010e06846765746888676f312e32322e34856c696e7578")
+                        .unwrap(),
+                ),
+                base_fee_per_gas: U256::from(27136),
+                block_hash: H256::from(hex!(
+                    "c001e15851608006eb33999e829bb265706929091f4c9a08f6853f6fbe96a730"
+                )),
+                transactions_root: H256::from(hex!(
+                    "7ffe241ea60187fdb0187bfa22de35d1f9bed7ab061d9401fd47e34a54fbede1"
+                )),
+                withdrawals_root: H256::from(hex!(
+                    "28ba1834a3a7b657460ce79fa3a1d909ab8828fd557659d4d0554a9bdbc0ec30"
+                )),
+                blob_gas_used: 0,
+                excess_blob_gas: 0,
+            },
+            execution_branch: [
+                H256::from(hex!(
+                    "d320d2b395e1065b0b2e3dbb7843c6d77cb7830ef340ffc968caa0f92e26f080"
+                )),
+                H256::from(hex!(
+                    "6c6dd63656639d153a2e86a9cab291e7a26e957ad635fec872d2836e92340c23"
+                )),
+                H256::from(hex!(
+                    "db56114e00fdd4c1f85c892bf35ac9a89289aaecb1ebd0a96cde606a748b5d71"
+                )),
+                H256::from(hex!(
+                    "ee70868f724f428f301007b0967c82d9c31fb5fd549d7f25342605169b90a3d6"
+                )),
+            ],
+        };
+
+        let lc_root = get_lc_execution_root(fork_parameters, header);
+        println!("{}", lc_root);
+
+        println!("Leaf: {:?}", lc_root);
+        println!("Branch: {:?}", header.execution_branch);
+        println!("Depth: {:?}", floorlog2(EXECUTION_PAYLOAD_INDEX));
+        println!("Index: {:?}", get_subtree_index(EXECUTION_PAYLOAD_INDEX));
+        println!("Root: {:?}", header.beacon.body_root);
+
+        validate_merkle_branch(
+            &lc_root,
+            &header.execution_branch,
+            floorlog2(EXECUTION_PAYLOAD_INDEX),
+            get_subtree_index(EXECUTION_PAYLOAD_INDEX),
+            &header.beacon.body_root,
+        )
+        .unwrap();
+
+        let ssz_bytes = header.execution.as_ssz_bytes();
+        println!("{:?}", ssz_bytes);
+        println!("{:?}", serde_utils::to_hex(&ssz_bytes));
+    }
+
+    #[test]
+    fn validate_merkle_branch2() {
+        let sync_committee = create_sync_committee::<Minimal>();
+
+        let original_leaf: H256 = H256::from(hex!(
+            "4b38a63385539322d28368f882ab8b57a238aaeabb381138b3e3ea4969f41cec"
+        ));
+        let leaf = H256::from(sync_committee.tree_hash_root());
+
+        let branch = [
+            H256::from(hex!(
+                "063d4752b358ab4b755ae05c71f7150480418e012487899c5d16d0bf5bede235"
+            )),
+            H256::from(hex!(
+                "27563a616b831b6536ec93f9c5a83191cad4ad0c770f3f6078826c60d420b46d"
+            )),
+            H256::from(hex!(
+                "1b21b6924f9c4e68dbfc52678ff808405a3f35450ab19f78b0f8ef44e5f0dd1b"
+            )),
+            H256::from(hex!(
+                "91c28c50b9cd409fc617875313ecf337b094d0ca98116789a8b3f2a0f85edcff"
+            )),
+            H256::from(hex!(
+                "31de67a97cb752d2c667e3d6d3963a5bb074661609eb6f7b52dc7cb1ddc0d327"
+            )),
+        ];
+
+        let depth = 5;
+
+        let index = 23;
+
+        let root = H256::from(hex!(
+            "85dc55edfa1ac40c3522fce75146a135e51594298ea02d3ee0efd0e369ec9721"
+        ));
+
+        println!("Original Leaf: {:?}", original_leaf);
+        println!("Leaf: {:?}", leaf);
+        println!("Branch: {:?}", branch);
+        println!("Depth: {:?}", depth);
+        println!("Index: {:?}", index);
+        println!("Root: {:?}", root);
+
+        validate_merkle_branch(&leaf, &branch, depth, index, &root).unwrap();
+    }
+
+    #[test]
+    fn test_single_pubkey() {
+        let pubkey = BlsPublicKey(
+            BASE64_STANDARD
+                .decode(
+                    "geqfdO99k1uAdHTjiVSuOTSFYhmiPgdJVLLoYMWjxAD5rttCzSfLTOtpfKNtHljL".as_bytes(),
+                )
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        );
+        let normal_pub_key_tree_hash = pubkey.tree_hash_root();
+
+        let aggregate_pubkey = BlsPublicKey(
+            BASE64_STANDARD
+                .decode(
+                    "p7kUGHfzl+nSo2zYZAc4e7zsbVV7MMzZ5ircohfkWNdJW1geBI+hCEIYyt+PRbn/".as_bytes(),
+                )
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        );
+        let aggregate_pub_key_tree_hash = aggregate_pubkey.tree_hash_root();
+
+        println!("normal: {:?}", to_hex(normal_pub_key_tree_hash));
+        println!("aggregate: {:?}", to_hex(aggregate_pub_key_tree_hash));
+
+        let sync_committee = create_sync_committee::<Minimal>();
+
+        let original_leaf: H256 = H256::from(hex!(
+            "4b38a63385539322d28368f882ab8b57a238aaeabb381138b3e3ea4969f41cec"
+        ));
+        let leaf: H256 = H256::from(sync_committee.tree_hash_root());
+
+        println!("Original Leaf: {:?}", original_leaf);
+        println!("Leaf: {:?}", leaf);
+
+        //assert_eq!(normal_pub_key_tree_hash, aggregate_pub_key_tree_hash);
+    }
+
+    fn create_logs_bloom<C: BYTES_PER_LOGS_BLOOM + MAX_EXTRA_DATA_BYTES>(
+    ) -> Vector<u8, C::BYTES_PER_LOGS_BLOOM> {
+        let logs_bloom: Vec<u8> = serde_utils::parse_hex("0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap();
+        Vector::<u8, C::BYTES_PER_LOGS_BLOOM>::try_from(logs_bloom).unwrap()
+    }
+
+    fn create_sync_committee<C: SYNC_COMMITTEE_SIZE>() -> SyncCommittee<C> {
+        /*
+        "next_sync_committee": {
+              "pubkeys": [
+                "geqfdO99k1uAdHTjiVSuOTSFYhmiPgdJVLLoYMWjxAD5rttCzSfLTOtpfKNtHljL",
+                "hNCNWMMbzTzd+T4T1vUCA4lzhK+jRkS/8RNe/o4ByBxqkcpsI0ux5RyjLkG4KKr5",
+                "p1n2vMqPNfyq3EBsxLgowBbA7SOIKYenn1Lykztc7e/iTjHfb9DTjoqALbr9dQ0B",
+                "jQKKAhxcMaGqHhjtp0z68PuhxFTBfC4PxzDdB6GdDHf3qQXVQBcpLz6ADKBraXfN",
+                "snrROvyP8w4Id5ezRMg4K7CoREdUnxsCdAWd3WUiduexSLqICKEMxFdGdilX1O++",
+                "qATk+o0TkanQeKqTmFoSUDuEzk9vH55wq3/KQh4c+XJThmYpnUwb/Dkye0abLbeo",
+                "mWMjr35UX7Y2Os5T8VOMfdw+sNmFskedo+5KzhDLw5O1GL8C0aLdsvW98JtHOTPq",
+                "lpR96eYGjCKncWZWonValVGwtmwtGnQb+EoIj+HoQOmS3DmGG/i6Po1bbSHo9X5k",
+                "rlMCeWz+ymherzf/1brrMhIfLwdBW+4mzABR7lE/85MtLDZePZ+HsJSaWYBEXLZM",
+                "mW0QwwJrk0RTKwbHCllvlyoed5ofYQbT2p9ro3a79+yC0vUmKeXb8/fQOwD2uGKv",
+                "o1xgBPOHQww3l6sBV697gkyP4QYkHHzeuJfZAMD55LuUX/KmuIy9EONexIqqVU7L",
+                "q9EmeMc0Y+zqWGeoDK8lbVxea6U/8YixQ6TVvoM2WtJX7fOeqhuodTxM30xjL/me",
+                "gfoiJzf+gYtD9V8gn0KtruE1soAdAnCWF/yIwocYUjWCYKzpfPMj52G1zBi8cyWz",
+                "q2T5AMdw4rmd5rhrQ5C70Veb1I3M7FWACtvPUuAG8iEo6ZcbvzqSzAEFsJdISZNa",
+                "kwdDv8fhjTvXNR6qdPR3UFJoweTh/RyjzMze+yWVUXNDu7j1WJxDXDw5MjpMAID4",
+                "q3LLxldcMXloCljA7NXeRtJnjMuvwBZ0Y0juVojtyyG04VvTfHDFCOPqcxA8LVZr",
+                "hNw3yjzWIdPaD73RHKhAIeDNgac9dy3W/PGXdbcutkr05XMhM3jM7gkV3ekqyDum",
+                "jUbpqgwZhgVuQH78cBO38nECfTyYzpZmf6qYB0qwWIphaB+veGRMEYGaRZqVaJ2r",
+                "teiYofwG1RxpVxKSj0RkbRVFE0DRs+SApA8DJQFgvAfTtmkeyUNh3VJNWdnff3bT",
+                "pO5tN9wlnLtSN+QmVCmp/Yq1ZDr4FijMEB4Ni0ozPvJhijffieo/krXqQzPYzaOT",
+                "iqW77iHpjHueekyOpFqpn4niKZL6T8LXOGnXfaTMigWyW2GTH/UhmGZ33X9xWejm",
+                "kXCe4GSXuawEkyWFPWSUcpAYmowjIuOlANkeI+oC3BWLbbY65Vizt2cDV6FRzWBx",
+                "j9pmuGB6+HP0wsghjdP/x5QNQRBH6xmbXNAQFWr0hF0h3S5lsORM//teeCcem7Kd",
+                "tyyxBre8HsriGeCuGDClCe0YoEK1aid59AM0Gd5puoroAXCQyu0fU3e/poUGFXNg",
+                "iWpR4LDeDykCmvOLeW2x8ebQ+fkIWt5AoxOmDLcj+j1Y9lhxdVcAhsT78P5TMfHI",
+                "qvbBJR5z+2AGJJN3YP7yGKrOWyU78GjtRTmK6ynYIeTSiZND3cu+N8s/bPUA3/Js",
+                "mRhDO48LxeEm2j/e+Ne3FFZJLa5tLQfy4Qx6f4UgRvhO0M5tO/7EIgBnDbJ9zzA3",
+                "oDwqgjdOBLLgWUxM4U+z8iW0bxMYjw2AAqUjx9z7k5rkhWBTwsnGlTdNfDaF3xyl",
+                "jYmF5d00HJA1s3v3ORxZRMKBMbR8fVNZ0Y/KWYAQuppj4nxV5rQhqAcDjDIFZNsX",
+                "skORqpe//ymtyTXQaittWDQzyvgvkt4ZgOAZLTsnAyO9vyS4bcYVIKQMQZ3ePfSz",
+                "r2HyY63ftBxG1m5g7PtZillC9kj1hxi2tOTJIBn9sSMo77/5hwMTS88o6cH6tLtg",
+                "tj8yffaFgc3AKmbBxl6Qagaho6jXpuOPe22pROjmzC24X87VMn2MEpRc6zMBgnLK"
+              ],
+              "aggregate_pubkey": "p7kUGHfzl+nSo2zYZAc4e7zsbVV7MMzZ5ircohfkWNdJW1geBI+hCEIYyt+PRbn/"
+            },
+        */
+        let pubkeys = vec![
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "geqfdO99k1uAdHTjiVSuOTSFYhmiPgdJVLLoYMWjxAD5rttCzSfLTOtpfKNtHljL"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "hNCNWMMbzTzd+T4T1vUCA4lzhK+jRkS/8RNe/o4ByBxqkcpsI0ux5RyjLkG4KKr5"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "p1n2vMqPNfyq3EBsxLgowBbA7SOIKYenn1Lykztc7e/iTjHfb9DTjoqALbr9dQ0B"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "jQKKAhxcMaGqHhjtp0z68PuhxFTBfC4PxzDdB6GdDHf3qQXVQBcpLz6ADKBraXfN"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "snrROvyP8w4Id5ezRMg4K7CoREdUnxsCdAWd3WUiduexSLqICKEMxFdGdilX1O++"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "qATk+o0TkanQeKqTmFoSUDuEzk9vH55wq3/KQh4c+XJThmYpnUwb/Dkye0abLbeo"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "mWMjr35UX7Y2Os5T8VOMfdw+sNmFskedo+5KzhDLw5O1GL8C0aLdsvW98JtHOTPq"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "lpR96eYGjCKncWZWonValVGwtmwtGnQb+EoIj+HoQOmS3DmGG/i6Po1bbSHo9X5k"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "rlMCeWz+ymherzf/1brrMhIfLwdBW+4mzABR7lE/85MtLDZePZ+HsJSaWYBEXLZM"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "mW0QwwJrk0RTKwbHCllvlyoed5ofYQbT2p9ro3a79+yC0vUmKeXb8/fQOwD2uGKv"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "o1xgBPOHQww3l6sBV697gkyP4QYkHHzeuJfZAMD55LuUX/KmuIy9EONexIqqVU7L"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "q9EmeMc0Y+zqWGeoDK8lbVxea6U/8YixQ6TVvoM2WtJX7fOeqhuodTxM30xjL/me"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "gfoiJzf+gYtD9V8gn0KtruE1soAdAnCWF/yIwocYUjWCYKzpfPMj52G1zBi8cyWz"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "q2T5AMdw4rmd5rhrQ5C70Veb1I3M7FWACtvPUuAG8iEo6ZcbvzqSzAEFsJdISZNa"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "kwdDv8fhjTvXNR6qdPR3UFJoweTh/RyjzMze+yWVUXNDu7j1WJxDXDw5MjpMAID4"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "q3LLxldcMXloCljA7NXeRtJnjMuvwBZ0Y0juVojtyyG04VvTfHDFCOPqcxA8LVZr"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "hNw3yjzWIdPaD73RHKhAIeDNgac9dy3W/PGXdbcutkr05XMhM3jM7gkV3ekqyDum"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "jUbpqgwZhgVuQH78cBO38nECfTyYzpZmf6qYB0qwWIphaB+veGRMEYGaRZqVaJ2r"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "teiYofwG1RxpVxKSj0RkbRVFE0DRs+SApA8DJQFgvAfTtmkeyUNh3VJNWdnff3bT"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "pO5tN9wlnLtSN+QmVCmp/Yq1ZDr4FijMEB4Ni0ozPvJhijffieo/krXqQzPYzaOT"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "iqW77iHpjHueekyOpFqpn4niKZL6T8LXOGnXfaTMigWyW2GTH/UhmGZ33X9xWejm"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "kXCe4GSXuawEkyWFPWSUcpAYmowjIuOlANkeI+oC3BWLbbY65Vizt2cDV6FRzWBx"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "j9pmuGB6+HP0wsghjdP/x5QNQRBH6xmbXNAQFWr0hF0h3S5lsORM//teeCcem7Kd"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "tyyxBre8HsriGeCuGDClCe0YoEK1aid59AM0Gd5puoroAXCQyu0fU3e/poUGFXNg"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "iWpR4LDeDykCmvOLeW2x8ebQ+fkIWt5AoxOmDLcj+j1Y9lhxdVcAhsT78P5TMfHI"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "qvbBJR5z+2AGJJN3YP7yGKrOWyU78GjtRTmK6ynYIeTSiZND3cu+N8s/bPUA3/Js"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "mRhDO48LxeEm2j/e+Ne3FFZJLa5tLQfy4Qx6f4UgRvhO0M5tO/7EIgBnDbJ9zzA3"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "oDwqgjdOBLLgWUxM4U+z8iW0bxMYjw2AAqUjx9z7k5rkhWBTwsnGlTdNfDaF3xyl"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "jYmF5d00HJA1s3v3ORxZRMKBMbR8fVNZ0Y/KWYAQuppj4nxV5rQhqAcDjDIFZNsX"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "skORqpe//ymtyTXQaittWDQzyvgvkt4ZgOAZLTsnAyO9vyS4bcYVIKQMQZ3ePfSz"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "r2HyY63ftBxG1m5g7PtZillC9kj1hxi2tOTJIBn9sSMo77/5hwMTS88o6cH6tLtg"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+            BlsPublicKey(
+                BASE64_STANDARD
+                    .decode(
+                        "tj8yffaFgc3AKmbBxl6Qagaho6jXpuOPe22pROjmzC24X87VMn2MEpRc6zMBgnLK"
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+        ];
+        let pubkeys = Vector::<BlsPublicKey, C::SYNC_COMMITTEE_SIZE>::try_from(pubkeys).unwrap();
+
+        let aggregate_pubkey = BlsPublicKey(
+            BASE64_STANDARD
+                .decode(
+                    "p7kUGHfzl+nSo2zYZAc4e7zsbVV7MMzZ5ircohfkWNdJW1geBI+hCEIYyt+PRbn/".as_bytes(),
+                )
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        );
+
+        SyncCommittee {
+            pubkeys,
+            aggregate_pubkey,
+        }
     }
 }

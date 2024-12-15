@@ -1,3 +1,5 @@
+use std::backtrace::Backtrace;
+
 use typenum::Unsigned;
 
 use crate::{
@@ -12,9 +14,17 @@ where
     T: Ssz,
     N: Unsigned,
 {
+    //println!("ssz vec_tree_hash_root");
+    //println!("Backtrace:\n{:?}", Backtrace::capture());
+
     match T::TREE_HASH_TYPE {
         TreeHashType::Basic { size } => {
-            let mut hasher = MerkleHasher::with_leaves(chunk_count_basic_list_or_vector::<N>(size));
+            //println!("ssz vec_tree_hash_root TreeHashType::Basic");
+            //println!("size: {}", size);
+            //println!("vec.len(): {}", vec.len());
+            let leaves = chunk_count_basic_list_or_vector::<N>(size);
+            //println!("leaves: {}", leaves);
+            let mut hasher = MerkleHasher::with_leaves(leaves);
 
             for item in vec {
                 hasher
@@ -22,11 +32,16 @@ where
                     .expect("ssz::types variable vec should not contain more elements than max");
             }
 
-            hasher
+            let res = hasher
                 .finish()
-                .expect("ssz::types variable vec should not have a remaining buffer")
+                .expect("ssz::types variable vec should not have a remaining buffer");
+            //println!("res: {:?}", res);
+            println!("vec_tree_hash_root res hex: {:?}", serde_utils::to_hex(res));
+
+            res
         }
         TreeHashType::Container | TreeHashType::List | TreeHashType::Vector => {
+            println!("ssz vec_tree_hash_root TreeHashType::Container | TreeHashType::List | TreeHashType::Vector");
             let mut hasher = MerkleHasher::with_leaves(N::USIZE);
 
             for item in vec {

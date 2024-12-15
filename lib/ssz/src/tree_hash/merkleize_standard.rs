@@ -19,6 +19,7 @@ use super::{hash_fixed, Hash256, HASHSIZE, MERKLE_HASH_CHUNK};
 ///  - Does not free up unused memory during operation.
 #[must_use]
 pub fn merkleize_standard(bytes: &[u8]) -> Hash256 {
+    println!("ssz merkleize_standard");
     // If the bytes are just one chunk (or less than one chunk) just return them.
     if bytes.len() <= HASHSIZE {
         let mut o = [0; HASHSIZE];

@@ -145,6 +145,7 @@ pub fn validate_merkle_branch<'a>(
     index: u64,
     root: &H256,
 ) -> Result<(), Error> {
+    println!("ARE WE HERE?!?!");
     let branch = branch.into_iter().cloned().collect::<Vec<_>>();
 
     'block: {
@@ -165,10 +166,12 @@ pub fn validate_merkle_branch<'a>(
                 )
                 .into();
             } else {
+                println!("break 'block false;");
                 break 'block false;
             }
         }
 
+        println!("value: {:?}", value);
         value == *root
     }
     .then_some(())
@@ -185,9 +188,10 @@ pub fn validate_merkle_branch<'a>(
 #[allow(clippy::redundant_clone)]
 mod tests {
 
+    use base64::{prelude::BASE64_STANDARD, Engine};
     use unionlabs::ethereum::{
         beacon::signing_data::SigningData,
-        config::{Minimal, SEPOLIA},
+        config::{Minimal, MINIMAL, SEPOLIA},
     };
 
     use super::*;
@@ -251,6 +255,29 @@ mod tests {
             compute_timestamp_at_slot::<Minimal>(0, 150),
             150 * <Minimal as SECONDS_PER_SLOT>::SECONDS_PER_SLOT::U64
         );
+    }
+
+    #[test]
+    fn test_compute_domain() {
+        let domain_type = DomainType::SYNC_COMMITTEE;
+        let fork_version = MINIMAL.fork_parameters.deneb.version;
+
+        let gz = BASE64_STANDARD
+            .decode("1h6khP66z65SmNUqK1gfPjBaUfMRKpJBuWjczwGfexE=")
+            .unwrap();
+        let genesis_validators_root = H256::try_from(gz).unwrap();
+        let genesis_fork_version = MINIMAL.fork_parameters.genesis_fork_version;
+
+        let domain = compute_domain(
+            domain_type,
+            Some(fork_version),
+            Some(genesis_validators_root),
+            genesis_fork_version,
+        );
+
+        let hex = BASE64_STANDARD.encode(domain.0.to_vec().as_slice());
+        println!("domain: {}", hex);
+        assert_eq!(domain, Domain::default());
     }
 
     #[test]
@@ -324,75 +351,75 @@ mod tests {
         )
     }
 
-    // #[test]
-    // fn valid_merkle_branch_works() {
-    //     // TODO(aeryz): move test data to ibc types
-    //     let header = <Header<Minimal>>::try_from_proto(
-    //         serde_json::from_str(include_str!(
-    //             "../../../light-clients/ethereum-light-client/src/test/finality_update_1.json"
-    //         ))
-    //         .unwrap(),
-    //     )
-    //     .unwrap();
-
-    //     let header = header.consensus_update.attested_header;
-
-    //     let valid_leaf = H256::from(header.execution.tree_hash_root());
-    //     let valid_branch = header.execution_branch.clone();
-    //     let valid_root = header.beacon.body_root.clone();
-
-    //     // Works for valid data
-    //     assert_eq!(
-    //         validate_merkle_branch(
-    //             &valid_leaf,
-    //             &valid_branch,
-    //             floorlog2(EXECUTION_PAYLOAD_INDEX),
-    //             EXECUTION_PAYLOAD_INDEX,
-    //             &valid_root,
-    //         ),
-    //         Ok(())
-    //     );
-
-    //     // Fails when index is wrong
-    //     assert!(validate_merkle_branch(
-    //         &valid_leaf,
-    //         &valid_branch,
-    //         floorlog2(EXECUTION_PAYLOAD_INDEX),
-    //         EXECUTION_PAYLOAD_INDEX + 1,
-    //         &valid_root,
-    //     )
-    //     .is_err());
-
-    //     let invalid_leaf = {
-    //         let mut header = header.clone();
-    //         header.execution.gas_limit += 1;
-    //         H256::from(header.execution.tree_hash_root())
-    //     };
-
-    //     // Fails when root is wrong
-    //     assert!(validate_merkle_branch(
-    //         &invalid_leaf,
-    //         &valid_branch,
-    //         floorlog2(EXECUTION_PAYLOAD_INDEX),
-    //         EXECUTION_PAYLOAD_INDEX,
-    //         &valid_root,
-    //     )
-    //     .is_err());
-
-    //     let invalid_branch = {
-    //         let mut header = header.clone();
-    //         header.execution_branch[0] = Default::default();
-    //         header.execution_branch
-    //     };
-
-    //     // Fails when branch is wrong
-    //     assert!(validate_merkle_branch(
-    //         &valid_leaf,
-    //         &invalid_branch,
-    //         floorlog2(EXECUTION_PAYLOAD_INDEX),
-    //         EXECUTION_PAYLOAD_INDEX,
-    //         &valid_root,
-    //     )
-    //     .is_err());
-    // }
+    //#[test]
+    //fn valid_merkle_branch_works() {
+    //    // TODO(aeryz): move test data to ibc types
+    //    let header = <Header<Minimal>>::try_from_proto(
+    //        serde_json::from_str(include_str!(
+    //            "../../../light-clients/ethereum-light-client/src/test/finality_update_1.json"
+    //        ))
+    //        .unwrap(),
+    //    )
+    //    .unwrap();
+    //
+    //    let header = header.consensus_update.attested_header;
+    //
+    //    let valid_leaf = H256::from(header.execution.tree_hash_root());
+    //    let valid_branch = header.execution_branch.clone();
+    //    let valid_root = header.beacon.body_root.clone();
+    //
+    //    // Works for valid data
+    //    assert_eq!(
+    //        validate_merkle_branch(
+    //            &valid_leaf,
+    //            &valid_branch,
+    //            floorlog2(EXECUTION_PAYLOAD_INDEX),
+    //            EXECUTION_PAYLOAD_INDEX,
+    //            &valid_root,
+    //        ),
+    //        Ok(())
+    //    );
+    //
+    //    // Fails when index is wrong
+    //    assert!(validate_merkle_branch(
+    //        &valid_leaf,
+    //        &valid_branch,
+    //        floorlog2(EXECUTION_PAYLOAD_INDEX),
+    //        EXECUTION_PAYLOAD_INDEX + 1,
+    //        &valid_root,
+    //    )
+    //    .is_err());
+    //
+    //    let invalid_leaf = {
+    //        let mut header = header.clone();
+    //        header.execution.gas_limit += 1;
+    //        H256::from(header.execution.tree_hash_root())
+    //    };
+    //
+    //    // Fails when root is wrong
+    //    assert!(validate_merkle_branch(
+    //        &invalid_leaf,
+    //        &valid_branch,
+    //        floorlog2(EXECUTION_PAYLOAD_INDEX),
+    //        EXECUTION_PAYLOAD_INDEX,
+    //        &valid_root,
+    //    )
+    //    .is_err());
+    //
+    //    let invalid_branch = {
+    //        let mut header = header.clone();
+    //        header.execution_branch[0] = Default::default();
+    //        header.execution_branch
+    //    };
+    //
+    //    // Fails when branch is wrong
+    //    assert!(validate_merkle_branch(
+    //        &valid_leaf,
+    //        &invalid_branch,
+    //        floorlog2(EXECUTION_PAYLOAD_INDEX),
+    //        EXECUTION_PAYLOAD_INDEX,
+    //        &valid_root,
+    //    )
+    //    .is_err());
+    //}
 }

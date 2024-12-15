@@ -661,38 +661,38 @@ mod test {
 
     const UPDATES_DIR_PATH: &str = "src/test/updates/";
 
-    //#[test]
-    //fn query_status_returns_active() {
-    //    let mut deps = OwnedDeps::<_, _, _, UnionCustomQuery> {
-    //        storage: MockStorage::default(),
-    //        api: MockApi::default(),
-    //        querier: MockQuerier::<UnionCustomQuery>::new(&[])
-    //            .with_custom_handler(custom_query_handler),
-    //        custom_query_type: PhantomData,
-    //    };
-    //
-    //    let wasm_client_state: WasmClientState =
-    //        serde_json::from_str(include_str!("./test/client_state.json")).unwrap();
-    //
-    //    let wasm_consensus_state: WasmConsensusState =
-    //        serde_json::from_str(include_str!("./test/consensus_state.json")).unwrap();
-    //
-    //    save_client_state::<EthereumLightClient>(deps.as_mut(), wasm_client_state);
-    //
-    //    save_consensus_state::<EthereumLightClient>(
-    //        deps.as_mut(),
-    //        wasm_consensus_state,
-    //        &INITIAL_CONSENSUS_STATE_HEIGHT,
-    //    );
-    //
-    //    let mut env = mock_env();
-    //    env.block.time = Timestamp::from_seconds(0);
-    //
-    //    assert_eq!(
-    //        EthereumLightClient::status(deps.as_ref(), &env),
-    //        Ok(Status::Active)
-    //    );
-    //}
+    #[test]
+    fn query_status_returns_active() {
+        let mut deps = OwnedDeps::<_, _, _, UnionCustomQuery> {
+            storage: MockStorage::default(),
+            api: MockApi::default(),
+            querier: MockQuerier::<UnionCustomQuery>::new(&[])
+                .with_custom_handler(custom_query_handler),
+            custom_query_type: PhantomData,
+        };
+
+        let wasm_client_state: WasmClientState =
+            serde_json::from_str(include_str!("./test/client_state.json")).unwrap();
+
+        let wasm_consensus_state: WasmConsensusState =
+            serde_json::from_str(include_str!("./test/consensus_state.json")).unwrap();
+
+        save_client_state::<EthereumLightClient>(deps.as_mut(), wasm_client_state);
+
+        save_consensus_state::<EthereumLightClient>(
+            deps.as_mut(),
+            wasm_consensus_state,
+            &INITIAL_CONSENSUS_STATE_HEIGHT,
+        );
+
+        let mut env = mock_env();
+        env.block.time = Timestamp::from_seconds(0);
+
+        assert_eq!(
+            EthereumLightClient::status(deps.as_ref(), &env),
+            Ok(Status::Active)
+        );
+    }
 
     //#[test]
     //fn query_status_returns_frozen() {

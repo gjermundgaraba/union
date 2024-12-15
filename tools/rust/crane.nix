@@ -154,7 +154,7 @@
           # a suffix to add to the package name.
           pnameSuffix ? "",
           # extra environment variables to pass to the derivation.
-          extraEnv ? { },
+          extraEnv ? { "RUST_BACKTRACE" = "1"; },
           # if true, build without -j1 and --release.
           dev ? false,
           extraBuildInputs ? [ ],

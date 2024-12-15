@@ -239,6 +239,7 @@ where
     const TREE_HASH_TYPE: TreeHashType = TreeHashType::Vector;
 
     fn tree_hash_root(&self) -> Hash256 {
+        println!("ssz [T; N] tree_hash_root");
         vec_tree_hash_root::<T, U<N>>(self)
     }
 
